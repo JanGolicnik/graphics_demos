@@ -4,9 +4,12 @@ use jandering_engine::{
     render_pass::RenderPass,
     renderer::Janderer,
     shader::ShaderDescriptor,
-    texture::{texture_usage, TextureDescriptor, TextureFormat},
+    texture::{sampler::SamplerDescriptor, texture_usage, TextureDescriptor, TextureFormat},
     types::Vec3,
-    utils::free_camera::{FreeCameraController, MatrixCamera},
+    utils::{
+        free_camera::{FreeCameraController, MatrixCamera},
+        texture::TextureSamplerBindGroup,
+    },
     window::{WindowConfig, WindowManagerTrait, WindowTrait},
 };
 
@@ -19,7 +22,6 @@ fn main() {
             .with_resolution(300, 300)
             .with_auto_resolution()
             .with_decorations(false)
-            .with_transparency(true)
             .with_fps_preference(jandering_engine::window::FpsPreference::Exact(120))
             .with_title("beast"),
     );
@@ -38,14 +40,39 @@ fn main() {
         ..Default::default()
     });
 
+    let mut target_texture = {
+        let texture_handle = renderer.create_texture(TextureDescriptor {
+            name: "target_texture",
+            format: TextureFormat::Bgra8U,
+            usage: texture_usage::GENERIC,
+            ..Default::default()
+        });
+        let sampler_handle = renderer.create_sampler(SamplerDescriptor::default());
+        TextureSamplerBindGroup::new(renderer, texture_handle, sampler_handle)
+    };
+
     let shader = renderer.create_shader(ShaderDescriptor {
         name: "main_shader",
+        source: jandering_engine::shader::ShaderSource::File(
+            jandering_engine::utils::FilePath::FileName("shader.wgsl"),
+        ),
         bind_group_layout_descriptors: vec![MatrixCamera::get_layout_descriptor()],
         depth: true,
+        target_texture_format: Some(TextureFormat::Bgra8U),
         ..Default::default()
     });
 
-    let n = 5;
+    let popr_shader = renderer.create_shader(ShaderDescriptor {
+        name: "popr_shader",
+        source: jandering_engine::shader::ShaderSource::File(
+            jandering_engine::utils::FilePath::FileName("popr_shader.wgsl"),
+        ),
+        bind_group_layout_descriptors: vec![TextureSamplerBindGroup::get_layout_descriptor()],
+        backface_culling: false,
+        ..Default::default()
+    });
+
+    let n = 10;
     let instances = (-n..=n)
         .flat_map(|x| {
             (-n..=n)
@@ -68,11 +95,33 @@ fn main() {
         // vec![Instance::default()],
     );
 
+    let fullscreen_quad = Object::quad(
+        renderer,
+        vec![Instance::default()
+            .translate(Vec3::new(-1.0, -1.0, 0.0))
+            .scale(2.0)],
+    );
+
     let mut last_time = std::time::Instant::now();
 
-    engine.run(|renderer, window_manager| {
+    let mut frame_counter = 0;
+    let mut frame_accumulator = 0.0;
+
+    engine.run_with_events(|renderer, window_manager, events| {
         if window.should_close() {
             window_manager.end();
+        }
+
+        for event in events {
+            match event {
+                jandering_engine::engine::EngineEvent::FileChanged(file_name) => {
+                    if file_name == "shader.wgsl" {
+                        renderer.reload_shader(shader);
+                    } else if file_name == "popr_shader.wgsl" {
+                        renderer.reload_shader(popr_shader)
+                    }
+                }
+            }
         }
 
         window.poll_events();
@@ -82,7 +131,13 @@ fn main() {
         let dt = (current_time - last_time).as_secs_f32();
         last_time = current_time;
 
-        println!("fps: {}", 1.0 / dt);
+        frame_accumulator += dt;
+        frame_counter += 1;
+        if frame_accumulator > 1.0 {
+            println!("fps: {}", frame_counter as f32 / frame_accumulator);
+            frame_accumulator = 0.0;
+            frame_counter = 0;
+        }
 
         for event in events.iter() {
             match event {
@@ -102,6 +157,21 @@ fn main() {
                         },
                         depth_texture,
                     );
+                    renderer.re_create_texture(
+                        TextureDescriptor {
+                            name: "target_texture",
+                            size: window.size().into(),
+                            format: TextureFormat::Bgra8U,
+                            usage: texture_usage::GENERIC,
+                            ..Default::default()
+                        },
+                        target_texture.texture_handle,
+                    );
+                    target_texture.re_create(
+                        renderer,
+                        target_texture.texture_handle,
+                        target_texture.sampler_handle,
+                    );
                 }
                 _ => {}
             }
@@ -110,13 +180,25 @@ fn main() {
         camera.update(renderer, events, dt);
 
         if window.is_initialized() {
-            let pass = RenderPass::new(&mut window)
+            let main_pass = RenderPass::new(&mut window)
                 .set_shader(shader)
+                .with_target_texture_resolve(
+                    jandering_engine::renderer::TargetTexture::Handle(
+                        target_texture.texture_handle,
+                    ),
+                    None,
+                )
                 .with_depth(depth_texture, Some(1.0))
                 .with_clear_color(0.7, 0.4, 0.3)
                 .bind(0, camera.bind_group())
                 .render_one(&object);
-            renderer.submit_pass(pass);
+            renderer.submit_pass(main_pass);
+
+            let popr_pass = RenderPass::new(&mut window)
+                .set_shader(popr_shader)
+                .bind(0, target_texture.bind_group)
+                .render_one(&fullscreen_quad);
+            renderer.submit_pass(popr_pass);
 
             window.request_redraw();
         }
