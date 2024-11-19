@@ -3,6 +3,12 @@ var tex: texture_2d<f32>;
 @group(0) @binding(1)
 var tex_sampler: sampler;
 
+@group(1) @binding(0)
+var world_position_tex: texture_storage_2d<rgba32float, read_write>;
+
+@group(2) @binding(0)
+var prev_world_position_tex: texture_storage_2d<rgba32float, read_write>;
+
 struct VertexInput{
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
@@ -61,6 +67,13 @@ fn vs_main(
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32>{
-    let color = textureSample(tex, tex_sampler, in.uv);
-    return color;
+    // let color = textureSample(tex, tex_sampler, in.uv);
+    let world_position_tex_size = textureDimensions(world_position_tex);
+    let t = vec2<u32>(u32(in.uv.x * f32(world_position_tex_size.x)), u32(in.uv.y * f32(world_position_tex_size.y)));
+    let current_world_tex_value = textureLoad(world_position_tex, t);
+    let prev_world_tex_value = textureLoad(prev_world_position_tex, t);
+
+    let world_delta = current_world_tex_value - prev_world_tex_value;
+
+    return vec4<f32>(world_delta.xyz, 1.0);
 }

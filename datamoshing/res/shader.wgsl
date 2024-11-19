@@ -10,9 +10,7 @@ struct Camera {
 var<uniform> camera: Camera;
 
 @group(1) @binding(0)
-var tex: texture_2d<f32>;
-@group(1) @binding(1)
-var tex_sampler: sampler;
+var world_position_tex: texture_storage_2d<rgba32float, read_write>;
 
 struct VertexInput{
     @location(0) position: vec3<f32>,
@@ -34,8 +32,10 @@ struct InstanceInput{
 
 struct VertexOutput{
     @builtin(position) clip_position: vec4<f32>,
-    @location(1) normal: vec3<f32>,
     @location(0) uv: vec2<f32>,
+    @location(1) normal: vec3<f32>,
+    @location(2) clip_position_raw: vec4<f32>,
+    @location(3) position: vec3<f32>,
 };
 
 @vertex
@@ -62,9 +62,11 @@ fn vs_main(
     let normal = transpose(inv_model_matrix) * vec4<f32>(model.normal, 1.0);    
     
     var out: VertexOutput;
-    out.clip_position = camera.view_proj * world_position;
+    out.clip_position_raw = camera.view_proj * world_position;
+    out.clip_position = out.clip_position_raw;
     out.normal = normalize(normal.xyz);
     out.uv = model.uv;
+    out.position = world_position.xyz;
     
     return out;
 }
@@ -72,6 +74,21 @@ fn vs_main(
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32>{
+    {
+        let texture_size = textureDimensions(world_position_tex);
+        var fbc = (in.clip_position_raw.xy / in.clip_position_raw.w) * 0.5 + 0.5;
+        fbc.y = 1.0 - fbc.y;
+        let depth = in.clip_position_raw.z / in.clip_position_raw.w;
+        let t = fbc * vec2<f32>(f32(texture_size.x), f32(texture_size.y));
+        
+        // zkj rabmo to ?
+        let current_value = textureLoad(world_position_tex, vec2<u32>(u32(t.x), u32(t.y)));
+        if (current_value.x == 0.0 && current_value.y == 0.0 && current_value.z == 0.0 ) || current_value.w > depth 
+        {
+            textureStore(world_position_tex, vec2<u32>(u32(t.x), u32(t.y)), vec4<f32>(in.position.xyz, depth));
+        }
+    }
+
     let light_dir = vec3<f32>(-1.0);
 
     let warm = vec3<f32>(1.0, 0.8, 0.5);

@@ -1,5 +1,5 @@
 use jandering_engine::{
-    engine::Engine,
+    engine::{Engine, EngineConfig},
     object::{Instance, Object},
     render_pass::RenderPass,
     renderer::Janderer,
@@ -8,13 +8,15 @@ use jandering_engine::{
     types::Vec3,
     utils::{
         free_camera::{FreeCameraController, MatrixCamera},
-        texture::TextureSamplerBindGroup,
+        texture::{StorageTextureBindGroup, TextureSamplerBindGroup},
     },
     window::{WindowConfig, WindowManagerTrait, WindowTrait},
 };
 
 fn main() {
-    let mut engine = pollster::block_on(Engine::default());
+    let mut engine = pollster::block_on(Engine::new(EngineConfig {
+        writable_storage: true,
+    }));
 
     let mut window = engine.spawn_window(
         WindowConfig::default()
@@ -51,12 +53,47 @@ fn main() {
         TextureSamplerBindGroup::new(renderer, texture_handle, sampler_handle)
     };
 
+    let mut storage_textures = [
+        {
+            let texture_handle = renderer.create_texture(TextureDescriptor {
+                name: "storage_texture1",
+                format: TextureFormat::Rgba32F,
+                usage: texture_usage::GENERIC_STORAGE,
+                ..Default::default()
+            });
+            StorageTextureBindGroup::new(
+                renderer,
+                texture_handle,
+                jandering_engine::bind_group::StorageTextureAccessType::ReadWrite,
+                TextureFormat::Rgba32F,
+            )
+        },
+        {
+            let texture_handle = renderer.create_texture(TextureDescriptor {
+                name: "storage_texture2",
+                format: TextureFormat::Rgba32F,
+                usage: texture_usage::GENERIC_STORAGE,
+                ..Default::default()
+            });
+            StorageTextureBindGroup::new(
+                renderer,
+                texture_handle,
+                jandering_engine::bind_group::StorageTextureAccessType::ReadWrite,
+                TextureFormat::Rgba32F,
+            )
+        },
+    ];
+    let mut current_storage_tex = 0;
+
     let shader = renderer.create_shader(ShaderDescriptor {
         name: "main_shader",
         source: jandering_engine::shader::ShaderSource::File(
             jandering_engine::utils::FilePath::FileName("shader.wgsl"),
         ),
-        bind_group_layout_descriptors: vec![MatrixCamera::get_layout_descriptor()],
+        bind_group_layout_descriptors: vec![
+            MatrixCamera::get_layout_descriptor(),
+            storage_textures[0].get_layout_descriptor(),
+        ],
         depth: true,
         target_texture_format: Some(TextureFormat::Bgra8U),
         ..Default::default()
@@ -67,7 +104,11 @@ fn main() {
         source: jandering_engine::shader::ShaderSource::File(
             jandering_engine::utils::FilePath::FileName("popr_shader.wgsl"),
         ),
-        bind_group_layout_descriptors: vec![TextureSamplerBindGroup::get_layout_descriptor()],
+        bind_group_layout_descriptors: vec![
+            TextureSamplerBindGroup::get_layout_descriptor(),
+            storage_textures[0].get_layout_descriptor(),
+            storage_textures[1].get_layout_descriptor(),
+        ],
         backface_culling: false,
         ..Default::default()
     });
@@ -172,6 +213,20 @@ fn main() {
                         target_texture.texture_handle,
                         target_texture.sampler_handle,
                     );
+
+                    for tex in storage_textures.iter_mut() {
+                        renderer.re_create_texture(
+                            TextureDescriptor {
+                                name: "storage_texture",
+                                size: window.size().into(),
+                                format: TextureFormat::Rgba32F,
+                                usage: texture_usage::GENERIC_STORAGE,
+                                ..Default::default()
+                            },
+                            tex.texture_handle,
+                        );
+                        tex.re_create(renderer, tex.texture_handle, tex.access_type, tex.format);
+                    }
                 }
                 _ => {}
             }
@@ -180,6 +235,8 @@ fn main() {
         camera.update(renderer, events, dt);
 
         if window.is_initialized() {
+            let other_storage_tex = if current_storage_tex == 0 { 1 } else { 0 };
+            renderer.clear_texture(storage_textures[current_storage_tex].texture_handle);
             let main_pass = RenderPass::new(&mut window)
                 .set_shader(shader)
                 .with_target_texture_resolve(
@@ -191,16 +248,21 @@ fn main() {
                 .with_depth(depth_texture, Some(1.0))
                 .with_clear_color(0.7, 0.4, 0.3)
                 .bind(0, camera.bind_group())
+                .bind(1, storage_textures[current_storage_tex].bind_group)
                 .render_one(&object);
             renderer.submit_pass(main_pass);
 
             let popr_pass = RenderPass::new(&mut window)
                 .set_shader(popr_shader)
                 .bind(0, target_texture.bind_group)
+                .bind(1, storage_textures[current_storage_tex].bind_group)
+                .bind(2, storage_textures[other_storage_tex].bind_group)
                 .render_one(&fullscreen_quad);
             renderer.submit_pass(popr_pass);
 
             window.request_redraw();
+
+            current_storage_tex = other_storage_tex;
         }
     });
 }
