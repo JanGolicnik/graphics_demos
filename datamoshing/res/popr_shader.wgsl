@@ -4,6 +4,11 @@ var tex: texture_2d<f32>;
 var tex_sampler: sampler;
 
 @group(1) @binding(0)
+var prev_tex: texture_2d<f32>;
+@group(1) @binding(1)
+var prev_tex_sampler: sampler;
+
+@group(2) @binding(0)
 var world_position_tex: texture_storage_2d<rg32float, read_write>;
 
 struct VertexInput{
@@ -64,10 +69,21 @@ fn vs_main(
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32>{
-    // let color = textureSample(tex, tex_sampler, in.uv);
+    var color = textureSample(tex, tex_sampler, in.uv);
+
+    //do motion blur
     let world_position_tex_size = textureDimensions(world_position_tex);
     let t = vec2<u32>(u32(in.uv.x * f32(world_position_tex_size.x)), u32(in.uv.y * f32(world_position_tex_size.y)));
-    let velocity = textureLoad(world_position_tex, t);
+    var velocity = textureLoad(world_position_tex, t) * 2.0;
+    velocity.y = -velocity.y;
 
-    return vec4<f32>(normalize(abs(velocity.xy)), 0.0, 1.0);
+    let n_samples = 10;
+    for (var i = 1; i <= n_samples; i += 1){
+        let t = f32(i) / f32(n_samples);
+        color += textureSample(prev_tex, prev_tex_sampler, in.uv - velocity.xy * t);
+    }
+    color /= f32(n_samples);
+
+    // return vec4<f32>(velocity, 0.0, 1.0);
+    return vec4<f32>(color.rgb, 1.0);
 }

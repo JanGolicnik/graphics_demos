@@ -79,16 +79,29 @@ fn main() {
         ..Default::default()
     });
 
-    let mut target_texture = {
-        let texture_handle = renderer.create_texture(TextureDescriptor {
-            name: "target_texture",
-            format: TextureFormat::Bgra8U,
-            usage: texture_usage::GENERIC,
-            ..Default::default()
-        });
-        let sampler_handle = renderer.create_sampler(SamplerDescriptor::default());
-        TextureSamplerBindGroup::new(renderer, texture_handle, sampler_handle)
-    };
+    let mut target_textures = [
+        {
+            let texture_handle = renderer.create_texture(TextureDescriptor {
+                name: "target_texture1",
+                format: TextureFormat::Bgra8U,
+                usage: texture_usage::GENERIC,
+                ..Default::default()
+            });
+            let sampler_handle = renderer.create_sampler(SamplerDescriptor::default());
+            TextureSamplerBindGroup::new(renderer, texture_handle, sampler_handle)
+        },
+        {
+            let texture_handle = renderer.create_texture(TextureDescriptor {
+                name: "target_texture2",
+                format: TextureFormat::Bgra8U,
+                usage: texture_usage::GENERIC,
+                ..Default::default()
+            });
+            let sampler_handle = renderer.create_sampler(SamplerDescriptor::default());
+            TextureSamplerBindGroup::new(renderer, texture_handle, sampler_handle)
+        },
+    ];
+    let mut current_target_texture = 0;
 
     let mut storage_texture = {
         let texture_handle = renderer.create_texture(TextureDescriptor {
@@ -127,6 +140,7 @@ fn main() {
             jandering_engine::utils::FilePath::FileName("popr_shader.wgsl"),
         ),
         bind_group_layout_descriptors: vec![
+            TextureSamplerBindGroup::get_layout_descriptor(),
             TextureSamplerBindGroup::get_layout_descriptor(),
             storage_texture.get_layout_descriptor(),
         ],
@@ -227,21 +241,24 @@ fn main() {
                         },
                         depth_texture,
                     );
-                    renderer.re_create_texture(
-                        TextureDescriptor {
-                            name: "target_texture",
-                            size: window.size().into(),
-                            format: TextureFormat::Bgra8U,
-                            usage: texture_usage::GENERIC,
-                            ..Default::default()
-                        },
-                        target_texture.texture_handle,
-                    );
-                    target_texture.re_create(
-                        renderer,
-                        target_texture.texture_handle,
-                        target_texture.sampler_handle,
-                    );
+
+                    for target_texture in target_textures.iter_mut() {
+                        renderer.re_create_texture(
+                            TextureDescriptor {
+                                name: "target_texture",
+                                size: window.size().into(),
+                                format: TextureFormat::Bgra8U,
+                                usage: texture_usage::GENERIC,
+                                ..Default::default()
+                            },
+                            target_texture.texture_handle,
+                        );
+                        target_texture.re_create(
+                            renderer,
+                            target_texture.texture_handle,
+                            target_texture.sampler_handle,
+                        );
+                    }
 
                     renderer.re_create_texture(
                         TextureDescriptor {
@@ -291,6 +308,9 @@ fn main() {
         camera.update(renderer, events, dt);
 
         if window.is_initialized() {
+            let target_texture = &target_textures[current_target_texture];
+            let prev_target_texture = if current_target_texture == 0 { 1 } else { 0 };
+
             renderer.clear_texture(storage_texture.texture_handle);
             let main_pass = RenderPass::new(&mut window)
                 .set_shader(shader)
@@ -311,11 +331,14 @@ fn main() {
             let popr_pass = RenderPass::new(&mut window)
                 .set_shader(popr_shader)
                 .bind(0, target_texture.bind_group)
-                .bind(1, storage_texture.bind_group)
+                .bind(1, target_textures[prev_target_texture].bind_group)
+                .bind(2, storage_texture.bind_group)
                 .render_one(&fullscreen_quad);
             renderer.submit_pass(popr_pass);
 
             window.request_redraw();
+
+            current_target_texture = prev_target_texture;
         }
     });
 }

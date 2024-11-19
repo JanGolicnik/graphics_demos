@@ -102,7 +102,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32>{
         let this_pos = (in.clip_position_raw.xy / in.clip_position_raw.w) * 0.5 + 0.5;
         let prev_pos = (in.prev_clip_position_raw.xy / in.prev_clip_position_raw.w) * 0.5 + 0.5;
 
-        var fbc = (in.clip_position_raw.xy / in.clip_position_raw.w) * 0.5 + 0.5;
+        var fbc = (in.prev_clip_position_raw.xy / in.prev_clip_position_raw.w) * 0.5 + 0.5;
         fbc.y = 1.0 - fbc.y;
         let t = fbc * vec2<f32>(f32(texture_size.x), f32(texture_size.y));
         let tex_uv = vec2<u32>(u32(t.x), u32(t.y));
