@@ -1,17 +1,52 @@
+use history_instance::HistoryInstance;
 use jandering_engine::{
+    bind_group::{
+        BindGroupLayout, BindGroupLayoutDescriptor, BindGroupLayoutDescriptorEntry,
+        BindGroupLayoutEntry,
+    },
     engine::{Engine, EngineConfig},
-    object::{Instance, Object},
+    object::{Instance, Object, Vertex},
     render_pass::RenderPass,
-    renderer::Janderer,
+    renderer::{BindGroupHandle, BufferHandle, Janderer, Renderer},
     shader::ShaderDescriptor,
     texture::{sampler::SamplerDescriptor, texture_usage, TextureDescriptor, TextureFormat},
-    types::Vec3,
+    types::{Mat4, Qua, Vec3},
     utils::{
         free_camera::{FreeCameraController, MatrixCamera},
         texture::{StorageTextureBindGroup, TextureSamplerBindGroup},
     },
     window::{WindowConfig, WindowManagerTrait, WindowTrait},
 };
+
+mod history_instance;
+
+struct PrevCameraMatBindGroup {
+    pub mat: Mat4,
+    pub buffer_handle: BufferHandle,
+    pub bind_group: BindGroupHandle,
+}
+
+impl PrevCameraMatBindGroup {
+    pub fn new(renderer: &mut Renderer) -> Self {
+        let mat = Mat4::IDENTITY;
+        let buffer_handle = renderer.create_uniform_buffer(bytemuck::cast_slice(&[mat]));
+        let bind_group = renderer.create_bind_group(BindGroupLayout {
+            entries: vec![BindGroupLayoutEntry::Data(buffer_handle)],
+        });
+
+        Self {
+            mat,
+            buffer_handle,
+            bind_group,
+        }
+    }
+
+    pub fn get_layout_descriptor() -> BindGroupLayoutDescriptor {
+        BindGroupLayoutDescriptor {
+            entries: vec![BindGroupLayoutDescriptorEntry::Data { is_uniform: true }],
+        }
+    }
+}
 
 fn main() {
     let mut engine = pollster::block_on(Engine::new(EngineConfig {
@@ -35,6 +70,8 @@ fn main() {
     camera.set_position(Vec3::new(10.0, 10.0, 10.0));
     camera.set_direction(-camera.position());
 
+    let mut prev_camera_mat = PrevCameraMatBindGroup::new(renderer);
+
     let depth_texture = renderer.create_texture(TextureDescriptor {
         name: "depth_texture",
         format: TextureFormat::Depth32F,
@@ -53,46 +90,31 @@ fn main() {
         TextureSamplerBindGroup::new(renderer, texture_handle, sampler_handle)
     };
 
-    let mut storage_textures = [
-        {
-            let texture_handle = renderer.create_texture(TextureDescriptor {
-                name: "storage_texture1",
-                format: TextureFormat::Rgba32F,
-                usage: texture_usage::GENERIC_STORAGE,
-                ..Default::default()
-            });
-            StorageTextureBindGroup::new(
-                renderer,
-                texture_handle,
-                jandering_engine::bind_group::StorageTextureAccessType::ReadWrite,
-                TextureFormat::Rgba32F,
-            )
-        },
-        {
-            let texture_handle = renderer.create_texture(TextureDescriptor {
-                name: "storage_texture2",
-                format: TextureFormat::Rgba32F,
-                usage: texture_usage::GENERIC_STORAGE,
-                ..Default::default()
-            });
-            StorageTextureBindGroup::new(
-                renderer,
-                texture_handle,
-                jandering_engine::bind_group::StorageTextureAccessType::ReadWrite,
-                TextureFormat::Rgba32F,
-            )
-        },
-    ];
-    let mut current_storage_tex = 0;
+    let mut storage_texture = {
+        let texture_handle = renderer.create_texture(TextureDescriptor {
+            name: "storage_texture",
+            format: TextureFormat::Rg32F,
+            usage: texture_usage::GENERIC_STORAGE,
+            ..Default::default()
+        });
+        StorageTextureBindGroup::new(
+            renderer,
+            texture_handle,
+            jandering_engine::bind_group::StorageTextureAccessType::ReadWrite,
+            TextureFormat::Rg32F,
+        )
+    };
 
     let shader = renderer.create_shader(ShaderDescriptor {
         name: "main_shader",
         source: jandering_engine::shader::ShaderSource::File(
             jandering_engine::utils::FilePath::FileName("shader.wgsl"),
         ),
+        descriptors: vec![Vertex::desc(), HistoryInstance::desc()],
         bind_group_layout_descriptors: vec![
             MatrixCamera::get_layout_descriptor(),
-            storage_textures[0].get_layout_descriptor(),
+            PrevCameraMatBindGroup::get_layout_descriptor(),
+            storage_texture.get_layout_descriptor(),
         ],
         depth: true,
         target_texture_format: Some(TextureFormat::Bgra8U),
@@ -106,8 +128,7 @@ fn main() {
         ),
         bind_group_layout_descriptors: vec![
             TextureSamplerBindGroup::get_layout_descriptor(),
-            storage_textures[0].get_layout_descriptor(),
-            storage_textures[1].get_layout_descriptor(),
+            storage_texture.get_layout_descriptor(),
         ],
         backface_culling: false,
         ..Default::default()
@@ -120,8 +141,14 @@ fn main() {
                 .flat_map(|y| {
                     (-n..=n)
                         .map(|z| {
-                            Instance::default()
-                                .translate(Vec3::new(x as f32, y as f32, z as f32) * 10.0)
+                            let model = Mat4::from_translation(
+                                Vec3::new(x as f32, y as f32, z as f32) * 10.0,
+                            );
+                            HistoryInstance {
+                                model,
+                                inv_model: model.inverse(),
+                                prev_model: model,
+                            }
                         })
                         .collect::<Vec<_>>()
                 })
@@ -129,7 +156,7 @@ fn main() {
         })
         .collect::<Vec<_>>();
 
-    let object = Object::from_obj(
+    let mut object = Object::from_obj(
         include_str!("icosphere.obj"),
         renderer,
         instances,
@@ -143,6 +170,7 @@ fn main() {
             .scale(2.0)],
     );
 
+    let mut time = 0.0;
     let mut last_time = std::time::Instant::now();
 
     let mut frame_counter = 0;
@@ -171,6 +199,7 @@ fn main() {
         let current_time = std::time::Instant::now();
         let dt = (current_time - last_time).as_secs_f32();
         last_time = current_time;
+        time += dt;
 
         frame_accumulator += dt;
         frame_counter += 1;
@@ -214,29 +243,55 @@ fn main() {
                         target_texture.sampler_handle,
                     );
 
-                    for tex in storage_textures.iter_mut() {
-                        renderer.re_create_texture(
-                            TextureDescriptor {
-                                name: "storage_texture",
-                                size: window.size().into(),
-                                format: TextureFormat::Rgba32F,
-                                usage: texture_usage::GENERIC_STORAGE,
-                                ..Default::default()
-                            },
-                            tex.texture_handle,
-                        );
-                        tex.re_create(renderer, tex.texture_handle, tex.access_type, tex.format);
-                    }
+                    renderer.re_create_texture(
+                        TextureDescriptor {
+                            name: "storage_texture",
+                            size: window.size().into(),
+                            format: TextureFormat::Rg32F,
+                            usage: texture_usage::GENERIC_STORAGE,
+                            ..Default::default()
+                        },
+                        storage_texture.texture_handle,
+                    );
+                    storage_texture.re_create(
+                        renderer,
+                        storage_texture.texture_handle,
+                        storage_texture.access_type,
+                        storage_texture.format,
+                    );
                 }
                 _ => {}
             }
         }
 
+        prev_camera_mat.mat = camera.matrix();
+        renderer.write_buffer(
+            prev_camera_mat.buffer_handle,
+            bytemuck::cast_slice(&[prev_camera_mat.mat]),
+        );
+
+        for instance in object.instances.iter_mut() {
+            let (scale, mut rotation, mut translation) =
+                instance.model.to_scale_rotation_translation();
+
+            rotation *= Qua::from_axis_angle(-translation.normalize(), 30.0f32.to_radians() * dt);
+
+            translation += (time * 1.2).sin() * dt * -translation * 0.1;
+
+            let model = Mat4::from_scale_rotation_translation(scale, rotation, translation);
+
+            *instance = HistoryInstance {
+                model,
+                inv_model: model.inverse(),
+                prev_model: instance.model,
+            };
+        }
+        object.update(renderer);
+
         camera.update(renderer, events, dt);
 
         if window.is_initialized() {
-            let other_storage_tex = if current_storage_tex == 0 { 1 } else { 0 };
-            renderer.clear_texture(storage_textures[current_storage_tex].texture_handle);
+            renderer.clear_texture(storage_texture.texture_handle);
             let main_pass = RenderPass::new(&mut window)
                 .set_shader(shader)
                 .with_target_texture_resolve(
@@ -248,21 +303,19 @@ fn main() {
                 .with_depth(depth_texture, Some(1.0))
                 .with_clear_color(0.7, 0.4, 0.3)
                 .bind(0, camera.bind_group())
-                .bind(1, storage_textures[current_storage_tex].bind_group)
+                .bind(1, prev_camera_mat.bind_group)
+                .bind(2, storage_texture.bind_group)
                 .render_one(&object);
             renderer.submit_pass(main_pass);
 
             let popr_pass = RenderPass::new(&mut window)
                 .set_shader(popr_shader)
                 .bind(0, target_texture.bind_group)
-                .bind(1, storage_textures[current_storage_tex].bind_group)
-                .bind(2, storage_textures[other_storage_tex].bind_group)
+                .bind(1, storage_texture.bind_group)
                 .render_one(&fullscreen_quad);
             renderer.submit_pass(popr_pass);
 
             window.request_redraw();
-
-            current_storage_tex = other_storage_tex;
         }
     });
 }

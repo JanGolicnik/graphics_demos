@@ -180,12 +180,12 @@ fn main() {
         for event in events {
             match event {
                 jandering_engine::engine::EngineEvent::FileChanged(file_name) => {
-                    if file_name == &"shader.wgsl" {
+                    if file_name == "shader.wgsl" {
                         renderer.reload_shader(shader);
                         renderer.reload_shader(cube_shader);
-                    } else if file_name == &"water_shader.wgsl" {
+                    } else if file_name == "water_shader.wgsl" {
                         renderer.reload_shader(water_shader)
-                    } else if file_name == &"popr_shader.wgsl" {
+                    } else if file_name == "popr_shader.wgsl" {
                         renderer.reload_shader(popr_shader)
                     }
                 }

@@ -10,7 +10,10 @@ struct Camera {
 var<uniform> camera: Camera;
 
 @group(1) @binding(0)
-var world_position_tex: texture_storage_2d<rgba32float, read_write>;
+var<uniform> prev_camera_mat: mat4x4<f32>;
+
+@group(2) @binding(0)
+var velocity_tex: texture_storage_2d<rg32float, read_write>;
 
 struct VertexInput{
     @location(0) position: vec3<f32>,
@@ -28,6 +31,11 @@ struct InstanceInput{
     @location(10) inv_model_matrix_1: vec4<f32>,
     @location(11) inv_model_matrix_2: vec4<f32>,
     @location(12) inv_model_matrix_3: vec4<f32>,
+
+    @location(13) prev_model_matrix_0: vec4<f32>,
+    @location(14) prev_model_matrix_1: vec4<f32>,
+    @location(15) prev_model_matrix_2: vec4<f32>,
+    @location(16) prev_model_matrix_3: vec4<f32>,
 }
 
 struct VertexOutput{
@@ -35,7 +43,7 @@ struct VertexOutput{
     @location(0) uv: vec2<f32>,
     @location(1) normal: vec3<f32>,
     @location(2) clip_position_raw: vec4<f32>,
-    @location(3) position: vec3<f32>,
+    @location(3) prev_clip_position_raw: vec4<f32>,
 };
 
 @vertex
@@ -58,35 +66,50 @@ fn vs_main(
         instance.inv_model_matrix_3,
     );
 
+    let prev_model_matrix = mat4x4<f32>(
+        instance.prev_model_matrix_0,
+        instance.prev_model_matrix_1,
+        instance.prev_model_matrix_2,
+        instance.prev_model_matrix_3,
+    );
+
+
     let world_position = model_matrix * vec4<f32>(model.position, 1.0);
     let normal = transpose(inv_model_matrix) * vec4<f32>(model.normal, 1.0);    
+
+    let prev_world_position = prev_model_matrix * vec4<f32>(model.position, 1.0);
     
     var out: VertexOutput;
     out.clip_position_raw = camera.view_proj * world_position;
     out.clip_position = out.clip_position_raw;
     out.normal = normalize(normal.xyz);
     out.uv = model.uv;
-    out.position = world_position.xyz;
+    out.prev_clip_position_raw = prev_camera_mat * prev_world_position;
     
     return out;
 }
 
+fn distance_squared(a: vec3<f32>, b: vec3<f32>) -> f32{
+    let d = a - b;
+    return a.x * d.x + d.y * d.y + d.z + d.z;
+}
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32>{
     {
-        let texture_size = textureDimensions(world_position_tex);
+        let texture_size = textureDimensions(velocity_tex);
+
+        let this_pos = (in.clip_position_raw.xy / in.clip_position_raw.w) * 0.5 + 0.5;
+        let prev_pos = (in.prev_clip_position_raw.xy / in.prev_clip_position_raw.w) * 0.5 + 0.5;
+
         var fbc = (in.clip_position_raw.xy / in.clip_position_raw.w) * 0.5 + 0.5;
         fbc.y = 1.0 - fbc.y;
-        let depth = in.clip_position_raw.z / in.clip_position_raw.w;
         let t = fbc * vec2<f32>(f32(texture_size.x), f32(texture_size.y));
+        let tex_uv = vec2<u32>(u32(t.x), u32(t.y));
         
-        // zkj rabmo to ?
-        let current_value = textureLoad(world_position_tex, vec2<u32>(u32(t.x), u32(t.y)));
-        if (current_value.x == 0.0 && current_value.y == 0.0 && current_value.z == 0.0 ) || current_value.w > depth 
-        {
-            textureStore(world_position_tex, vec2<u32>(u32(t.x), u32(t.y)), vec4<f32>(in.position.xyz, depth));
-        }
+        let velocity = this_pos - prev_pos;
+
+        textureStore(velocity_tex, tex_uv, vec4<f32>(velocity, 0.0, 1.0));
     }
 
     let light_dir = vec3<f32>(-1.0);

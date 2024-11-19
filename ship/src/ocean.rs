@@ -197,9 +197,8 @@ impl Ocean {
 
         let bottom = bottomleft * (1.0 - fx) + bottomright * fx;
         let top = topleft * (1.0 - fx) + topright * fx;
-        let value = bottom * (1.0 - fy) + top * fy;
 
-        value
+        bottom * (1.0 - fy) + top * fy
     }
 }
 

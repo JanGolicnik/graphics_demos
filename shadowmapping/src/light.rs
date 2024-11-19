@@ -127,7 +127,7 @@ impl Light {
     }
 
     pub fn data_only_bind_group(&self) -> BindGroupHandle {
-        self.data_bind_group.into()
+        self.data_bind_group
     }
 
     pub fn get_layout_descriptor() -> jandering_engine::bind_group::BindGroupLayoutDescriptor {
@@ -145,7 +145,7 @@ impl Light {
     }
 
     pub fn bind_group(&self) -> BindGroupHandle {
-        self.light_bind_group.into()
+        self.light_bind_group
     }
 
     pub fn texture(&self) -> TextureHandle {
