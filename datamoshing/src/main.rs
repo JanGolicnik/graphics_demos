@@ -100,8 +100,17 @@ fn main() {
             let sampler_handle = renderer.create_sampler(SamplerDescriptor::default());
             TextureSamplerBindGroup::new(renderer, texture_handle, sampler_handle)
         },
+        {
+            let texture_handle = renderer.create_texture(TextureDescriptor {
+                name: "target_texture3",
+                format: TextureFormat::Bgra8U,
+                usage: texture_usage::GENERIC,
+                ..Default::default()
+            });
+            let sampler_handle = renderer.create_sampler(SamplerDescriptor::default());
+            TextureSamplerBindGroup::new(renderer, texture_handle, sampler_handle)
+        },
     ];
-    let mut current_target_texture = 0;
 
     let mut storage_texture = {
         let texture_handle = renderer.create_texture(TextureDescriptor {
@@ -144,6 +153,22 @@ fn main() {
             TextureSamplerBindGroup::get_layout_descriptor(),
             storage_texture.get_layout_descriptor(),
         ],
+        fs_entry: "fs_datamosh",
+        backface_culling: false,
+        ..Default::default()
+    });
+
+    let blit_shader = renderer.create_shader(ShaderDescriptor {
+        name: "blit_shader",
+        source: jandering_engine::shader::ShaderSource::File(
+            jandering_engine::utils::FilePath::FileName("popr_shader.wgsl"),
+        ),
+        bind_group_layout_descriptors: vec![
+            TextureSamplerBindGroup::get_layout_descriptor(),
+            TextureSamplerBindGroup::get_layout_descriptor(),
+            storage_texture.get_layout_descriptor(),
+        ],
+        fs_entry: "fs_blit",
         backface_culling: false,
         ..Default::default()
     });
@@ -281,6 +306,10 @@ fn main() {
             }
         }
 
+        if events.is_pressed(jandering_engine::window::Key::Q) {
+            camera.set_position(Vec3::ZERO);
+        }
+
         prev_camera_mat.mat = camera.matrix();
         renderer.write_buffer(
             prev_camera_mat.buffer_handle,
@@ -307,16 +336,18 @@ fn main() {
 
         camera.update(renderer, events, dt);
 
-        if window.is_initialized() {
-            let target_texture = &target_textures[current_target_texture];
-            let prev_target_texture = if current_target_texture == 0 { 1 } else { 0 };
+        renderer.blit_textures(
+            target_textures[1].texture_handle,
+            target_textures[2].texture_handle,
+        );
 
+        if window.is_initialized() {
             renderer.clear_texture(storage_texture.texture_handle);
             let main_pass = RenderPass::new(&mut window)
                 .set_shader(shader)
                 .with_target_texture_resolve(
                     jandering_engine::renderer::TargetTexture::Handle(
-                        target_texture.texture_handle,
+                        target_textures[0].texture_handle,
                     ),
                     None,
                 )
@@ -330,15 +361,27 @@ fn main() {
 
             let popr_pass = RenderPass::new(&mut window)
                 .set_shader(popr_shader)
-                .bind(0, target_texture.bind_group)
-                .bind(1, target_textures[prev_target_texture].bind_group)
+                .with_target_texture_resolve(
+                    jandering_engine::renderer::TargetTexture::Handle(
+                        target_textures[1].texture_handle,
+                    ),
+                    None,
+                )
+                .bind(0, target_textures[0].bind_group)
+                .bind(1, target_textures[2].bind_group)
                 .bind(2, storage_texture.bind_group)
+                .render_one(&fullscreen_quad)
+                .set_shader(blit_shader)
+                .with_target_texture_resolve(
+                    jandering_engine::renderer::TargetTexture::Screen,
+                    None,
+                )
                 .render_one(&fullscreen_quad);
             renderer.submit_pass(popr_pass);
 
             window.request_redraw();
 
-            current_target_texture = prev_target_texture;
+            // current_target_texture = prev_target_texture;
         }
     });
 }

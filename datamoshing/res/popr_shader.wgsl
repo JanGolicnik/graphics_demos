@@ -66,24 +66,20 @@ fn vs_main(
     return out;
 }
 
-
 @fragment
-fn fs_main(in: VertexOutput) -> @location(0) vec4<f32>{
-    var color = textureSample(tex, tex_sampler, in.uv);
-
-    //do motion blur
+fn fs_datamosh(in: VertexOutput) -> @location(0) vec4<f32>{
     let world_position_tex_size = textureDimensions(world_position_tex);
     let t = vec2<u32>(u32(in.uv.x * f32(world_position_tex_size.x)), u32(in.uv.y * f32(world_position_tex_size.y)));
     var velocity = textureLoad(world_position_tex, t) * 2.0;
     velocity.y = -velocity.y;
 
-    let n_samples = 10;
-    for (var i = 1; i <= n_samples; i += 1){
-        let t = f32(i) / f32(n_samples);
-        color += textureSample(prev_tex, prev_tex_sampler, in.uv - velocity.xy * t);
-    }
-    color /= f32(n_samples);
+    return vec4<f32>(velocity.xy, 0.0, 1.0);
 
-    // return vec4<f32>(velocity, 0.0, 1.0);
-    return vec4<f32>(color.rgb, 1.0);
+    // let offset_tex = textureSample(prev_tex, prev_tex_sampler, in.uv - velocity.xy);
+    // return offset_tex;
+}
+
+@fragment
+fn fs_blit(in: VertexOutput) -> @location(0) vec4<f32>{
+    return textureSample(tex, tex_sampler, in.uv);
 }
