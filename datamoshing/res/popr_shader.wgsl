@@ -4,11 +4,6 @@ var tex: texture_2d<f32>;
 var tex_sampler: sampler;
 
 @group(1) @binding(0)
-var prev_tex: texture_2d<f32>;
-@group(1) @binding(1)
-var prev_tex_sampler: sampler;
-
-@group(2) @binding(0)
 var world_position_tex: texture_storage_2d<rg32float, read_write>;
 
 struct VertexInput{
@@ -73,10 +68,14 @@ fn fs_datamosh(in: VertexOutput) -> @location(0) vec4<f32>{
     var velocity = textureLoad(world_position_tex, t) * 2.0;
     velocity.y = -velocity.y;
 
-    return vec4<f32>(velocity.xy, 0.0, 1.0);
+    // return vec4<f32>(velocity.xy, 0.0, 1.0);
 
-    // let offset_tex = textureSample(prev_tex, prev_tex_sampler, in.uv - velocity.xy);
-    // return offset_tex;
+    let offset_tex = textureSample(tex, tex_sampler, in.uv + velocity.xy);
+    if offset_tex.w == 0.0 {
+        discard;
+    }
+    return offset_tex;
+    // return vec4<f32>(offset_tex.rg + velocity.xy * 2.0, offset_tex.b, 1.0);
 }
 
 @fragment

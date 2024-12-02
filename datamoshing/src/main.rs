@@ -15,7 +15,7 @@ use jandering_engine::{
         free_camera::{FreeCameraController, MatrixCamera},
         texture::{StorageTextureBindGroup, TextureSamplerBindGroup},
     },
-    window::{WindowConfig, WindowManagerTrait, WindowTrait},
+    window::{InputState, WindowConfig, WindowManagerTrait, WindowTrait},
 };
 
 mod history_instance;
@@ -127,21 +127,31 @@ fn main() {
         )
     };
 
-    let shader = renderer.create_shader(ShaderDescriptor {
-        name: "main_shader",
-        source: jandering_engine::shader::ShaderSource::File(
-            jandering_engine::utils::FilePath::FileName("shader.wgsl"),
-        ),
-        descriptors: vec![Vertex::desc(), HistoryInstance::desc()],
-        bind_group_layout_descriptors: vec![
-            MatrixCamera::get_layout_descriptor(),
-            PrevCameraMatBindGroup::get_layout_descriptor(),
-            storage_texture.get_layout_descriptor(),
-        ],
-        depth: true,
-        target_texture_format: Some(TextureFormat::Bgra8U),
-        ..Default::default()
-    });
+    let (shader, random_color_shader) = {
+        let desc = ShaderDescriptor {
+            name: "main_shader",
+            source: jandering_engine::shader::ShaderSource::File(
+                jandering_engine::utils::FilePath::FileName("shader.wgsl"),
+            ),
+            descriptors: vec![Vertex::desc(), HistoryInstance::desc()],
+            bind_group_layout_descriptors: vec![
+                MatrixCamera::get_layout_descriptor(),
+                PrevCameraMatBindGroup::get_layout_descriptor(),
+                storage_texture.get_layout_descriptor(),
+            ],
+            depth: true,
+            target_texture_format: Some(TextureFormat::Bgra8U),
+            ..Default::default()
+        };
+
+        (
+            renderer.create_shader(ShaderDescriptor {
+                fs_entry: "fs_random_colors",
+                ..desc.clone()
+            }),
+            renderer.create_shader(desc),
+        )
+    };
 
     let popr_shader = renderer.create_shader(ShaderDescriptor {
         name: "popr_shader",
@@ -149,7 +159,6 @@ fn main() {
             jandering_engine::utils::FilePath::FileName("popr_shader.wgsl"),
         ),
         bind_group_layout_descriptors: vec![
-            TextureSamplerBindGroup::get_layout_descriptor(),
             TextureSamplerBindGroup::get_layout_descriptor(),
             storage_texture.get_layout_descriptor(),
         ],
@@ -163,11 +172,7 @@ fn main() {
         source: jandering_engine::shader::ShaderSource::File(
             jandering_engine::utils::FilePath::FileName("popr_shader.wgsl"),
         ),
-        bind_group_layout_descriptors: vec![
-            TextureSamplerBindGroup::get_layout_descriptor(),
-            TextureSamplerBindGroup::get_layout_descriptor(),
-            storage_texture.get_layout_descriptor(),
-        ],
+        bind_group_layout_descriptors: vec![TextureSamplerBindGroup::get_layout_descriptor()],
         fs_entry: "fs_blit",
         backface_culling: false,
         ..Default::default()
@@ -215,6 +220,19 @@ fn main() {
     let mut frame_counter = 0;
     let mut frame_accumulator = 0.0;
 
+    let mut current_clear_color = 0;
+    let clear_colors = [
+        Vec3::new(0.7, 0.4, 0.3),
+        Vec3::new(0.3, 0.7, 0.4),
+        Vec3::new(0.4, 0.3, 0.7),
+        Vec3::new(0.4, 0.7, 0.3),
+    ];
+
+    let mut refresh = true;
+    let mut no_camera = false;
+    let mut random_colors = false;
+    let mut alpha0 = true;
+
     engine.run_with_events(|renderer, window_manager, events| {
         if window.should_close() {
             window_manager.end();
@@ -233,7 +251,7 @@ fn main() {
         }
 
         window.poll_events();
-        let events = window.events();
+        let events = window.events().clone();
 
         let current_time = std::time::Instant::now();
         let dt = (current_time - last_time).as_secs_f32();
@@ -302,19 +320,23 @@ fn main() {
                         storage_texture.format,
                     );
                 }
+                jandering_engine::window::WindowEvent::KeyInput {
+                    key,
+                    state: InputState::Pressed,
+                } => match key {
+                    jandering_engine::window::Key::Key1 => camera.set_position(Vec3::ZERO),
+                    jandering_engine::window::Key::Key2 => {
+                        refresh = true;
+                        current_clear_color = (current_clear_color + 1) % clear_colors.len();
+                    }
+                    jandering_engine::window::Key::Key3 => no_camera = !no_camera,
+                    jandering_engine::window::Key::Key4 => random_colors = !random_colors,
+                    jandering_engine::window::Key::Key5 => alpha0 = !alpha0,
+                    _ => {}
+                },
                 _ => {}
             }
         }
-
-        if events.is_pressed(jandering_engine::window::Key::Q) {
-            camera.set_position(Vec3::ZERO);
-        }
-
-        prev_camera_mat.mat = camera.matrix();
-        renderer.write_buffer(
-            prev_camera_mat.buffer_handle,
-            bytemuck::cast_slice(&[prev_camera_mat.mat]),
-        );
 
         for instance in object.instances.iter_mut() {
             let (scale, mut rotation, mut translation) =
@@ -332,19 +354,34 @@ fn main() {
                 prev_model: instance.model,
             };
         }
+
         object.update(renderer);
 
-        camera.update(renderer, events, dt);
+        prev_camera_mat.mat = camera.matrix();
+        camera.update(renderer, &events, dt);
 
-        renderer.blit_textures(
-            target_textures[1].texture_handle,
-            target_textures[2].texture_handle,
+        if no_camera {
+            prev_camera_mat.mat = camera.matrix()
+        }
+        renderer.write_buffer(
+            prev_camera_mat.buffer_handle,
+            bytemuck::cast_slice(&[prev_camera_mat.mat]),
         );
 
         if window.is_initialized() {
+            let clear_color = clear_colors[current_clear_color];
+
+            let main_shader = if random_colors {
+                shader
+            } else {
+                random_color_shader
+            };
+
+            let alpha = if alpha0 { 0.0 } else { 1.0 };
+
             renderer.clear_texture(storage_texture.texture_handle);
             let main_pass = RenderPass::new(&mut window)
-                .set_shader(shader)
+                .set_shader(main_shader)
                 .with_target_texture_resolve(
                     jandering_engine::renderer::TargetTexture::Handle(
                         target_textures[0].texture_handle,
@@ -352,36 +389,48 @@ fn main() {
                     None,
                 )
                 .with_depth(depth_texture, Some(1.0))
-                .with_clear_color(0.7, 0.4, 0.3)
+                .with_clear_color(clear_color.x, clear_color.y, clear_color.z)
+                .with_alpha(alpha)
                 .bind(0, camera.bind_group())
                 .bind(1, prev_camera_mat.bind_group)
                 .bind(2, storage_texture.bind_group)
                 .render_one(&object);
             renderer.submit_pass(main_pass);
 
+            if refresh {
+                refresh = false;
+                renderer.blit_textures(
+                    target_textures[0].texture_handle,
+                    target_textures[1].texture_handle,
+                );
+            }
+
             let popr_pass = RenderPass::new(&mut window)
                 .set_shader(popr_shader)
                 .with_target_texture_resolve(
                     jandering_engine::renderer::TargetTexture::Handle(
-                        target_textures[1].texture_handle,
+                        target_textures[2].texture_handle,
                     ),
                     None,
                 )
-                .bind(0, target_textures[0].bind_group)
-                .bind(1, target_textures[2].bind_group)
-                .bind(2, storage_texture.bind_group)
+                .bind(0, target_textures[1].bind_group)
+                .bind(1, storage_texture.bind_group)
                 .render_one(&fullscreen_quad)
                 .set_shader(blit_shader)
                 .with_target_texture_resolve(
                     jandering_engine::renderer::TargetTexture::Screen,
                     None,
                 )
+                .bind(0, target_textures[2].bind_group)
                 .render_one(&fullscreen_quad);
             renderer.submit_pass(popr_pass);
 
-            window.request_redraw();
+            renderer.blit_textures(
+                target_textures[2].texture_handle,
+                target_textures[1].texture_handle,
+            );
 
-            // current_target_texture = prev_target_texture;
+            window.request_redraw();
         }
     });
 }
