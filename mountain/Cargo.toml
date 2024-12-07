@@ -1,0 +1,10 @@
+[package]
+name = "mountain"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bytemuck = "1.19.0"
+    #jandering_engine = "0.3.0"
+jandering_engine = {path = "../../jandering_stuff/jandering_engine/" }
+pollster = "0.4.0"
