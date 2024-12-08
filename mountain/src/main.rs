@@ -1,14 +1,55 @@
 use jandering_engine::{
     engine::{Engine, EngineConfig},
-    object::{Instance, Object, Vertex},
+    object::{primitives::plane_data, Instance, Object, Vertex},
     render_pass::RenderPass,
     renderer::Janderer,
     shader::ShaderDescriptor,
     texture::{texture_usage, TextureDescriptor, TextureFormat},
-    types::{Mat4, Vec3},
+    types::{Mat4, Vec2, Vec3},
     utils::free_camera::{FreeCameraController, MatrixCamera},
     window::{self, WindowConfig, WindowEvent::Resized, WindowManagerTrait, WindowTrait},
 };
+
+struct Heightfield<const W: usize, const H: usize> {
+    data: [[f32; W]; H],
+}
+
+impl<const W: usize, const H: usize> Heightfield<W, H> {
+    pub fn new() -> Self {
+        let mut data = [[0.0; W]; H];
+
+        for y in 0..H {
+            for x in 0..W {
+                data[y][x] = (Vec2::new(y as f32 / H as f32, x as f32 / W as f32) - 0.5).length();
+            }
+        }
+
+        Heightfield { data }
+    }
+
+    fn sample(&self, mut uv: Vec2) -> f32 {
+        uv = uv.fract() * Vec2::new(W as f32, H as f32);
+
+        let x0 = uv.x.floor() as usize;
+        let y0 = uv.y.floor() as usize;
+
+        let x1 = (x0 + 1) % W;
+        let y1 = (y0 + 1) % H;
+
+        let fx = uv.x - uv.x.floor();
+        let fy = uv.y - uv.y.floor();
+
+        let bottomleft = self.data[y0][x0] as f32;
+        let bottomright = self.data[y0][x1] as f32;
+        let topleft = self.data[y1][x0] as f32;
+        let topright = self.data[y1][x1] as f32;
+
+        let bottom = bottomleft * (1.0 - fx) + bottomright * fx;
+        let top = topleft * (1.0 - fx) + topright * fx;
+
+        bottom * (1.0 - fy) + top * fy
+    }
+}
 
 fn main() {
     let mut engine = pollster::block_on(Engine::new(EngineConfig {
@@ -73,6 +114,27 @@ fn main() {
         })
         .collect::<Vec<_>>();
 
+    let mut plane = {
+        const RESOLUTION: usize = 7;
+        const N_VERTICES: usize = 2usize.pow(RESOLUTION as u32);
+        let (mut vertices, indices) = plane_data(RESOLUTION as u32, true);
+        let heightfield = Heightfield::<N_VERTICES, N_VERTICES>::new();
+        //        let heightfield = generate_heightfield(2 ^ resolution, 2 ^ resolution);
+
+        for vertex in vertices.iter_mut() {
+            vertex.position.z += heightfield.sample(vertex.uv);
+        }
+
+        Object::new(
+            renderer,
+            vertices,
+            indices,
+            vec![Instance::default()
+                .rotate(90.0f32.to_radians(), Vec3::X)
+                .scale(100.0)],
+        )
+    };
+
     let mut object = Object::triangle(renderer, instances);
 
     let mut time = 0.0;
@@ -133,7 +195,9 @@ fn main() {
             }
         }
 
-        object.update(renderer);
+        plane.instances[0].set_rotation(30.0f32.to_radians() * dt, Vec3::Y);
+        plane.update(renderer);
+        //object.update(renderer);
 
         camera.update(renderer, &events, dt);
 
@@ -143,7 +207,7 @@ fn main() {
                 .with_depth(depth_texture, Some(1.0))
                 .with_clear_color(0.7, 0.4, 0.3)
                 .bind(0, camera.bind_group())
-                .render_one(&object);
+                .render_one(&plane);
             renderer.submit_pass(main_pass);
 
             window.request_redraw();
