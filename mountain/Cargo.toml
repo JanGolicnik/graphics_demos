@@ -8,3 +8,4 @@ bytemuck = "1.19.0"
     #jandering_engine = "0.3.0"
 jandering_engine = {path = "../../jandering_stuff/jandering_engine/" }
 pollster = "0.4.0"
+noise = "0.9.0"

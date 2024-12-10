@@ -5,7 +5,7 @@ use jandering_engine::{
     renderer::Janderer,
     shader::ShaderDescriptor,
     texture::{texture_usage, TextureDescriptor, TextureFormat},
-    types::{Mat4, Vec2, Vec3},
+    types::{Mat4, Qua, Vec2, Vec3},
     utils::free_camera::{FreeCameraController, MatrixCamera},
     window::{self, WindowConfig, WindowEvent::Resized, WindowManagerTrait, WindowTrait},
 };
@@ -18,11 +18,41 @@ impl<const W: usize, const H: usize> Heightfield<W, H> {
     pub fn new() -> Self {
         let mut data = [[0.0; W]; H];
 
+        use noise::utils::PlaneMapBuilder;
+        let hasher = noise::permutationtable::PermutationTable::new(0);
+
+        let n_iterations = 10;
+        let maps = (0..n_iterations)
+            .map(|i| {
+                let p = 2i32.pow(i as u32 + 1);
+                PlaneMapBuilder::new_fn(|point| {
+                    noise::core::perlin::perlin_2d(point.into(), &hasher)
+                })
+                .set_size(W, H)
+                .set_x_bounds(-p as f64, p as f64)
+                .set_y_bounds(-p as f64, p as f64)
+                .set_is_seamless(true)
+                .build()
+            })
+            .collect::<Vec<_>>();
+
         for y in 0..H {
             for x in 0..W {
-                data[y][x] = (Vec2::new(y as f32 / H as f32, x as f32 / W as f32) - 0.5).length();
+                for (i, map) in maps.iter().enumerate() {
+                    data[y][x] += map.get_value(x, y) as f32 / 2i32.pow(i as u32 + 1) as f32;
+                }
+                let scalar = (1.0 - (Vec2::new(x as f32 / W as f32, y as f32 / H as f32) * 2.0 - 1.0).length()).max(0.0);
+                data[y][x] *= scalar;
             }
         }
+
+        dbg!(data
+            .iter()
+            .map(|e| e
+                .clone()
+                .into_iter()
+                .max_by(|a, b| a.partial_cmp(b).unwrap()))
+            .max_by(|a, b| a.partial_cmp(b).unwrap()));
 
         Heightfield { data }
     }
@@ -100,13 +130,8 @@ fn main() {
                 .flat_map(|y| {
                     (-n..=n)
                         .map(|z| {
-                            let model = Mat4::from_translation(
-                                Vec3::new(x as f32, y as f32, z as f32) * 10.0,
-                            );
-                            Instance {
-                                model,
-                                inv_model: model.inverse(),
-                            }
+                            Instance::default()
+                                .translated(Vec3::new(x as f32, y as f32, z as f32) * 10.0)
                         })
                         .collect::<Vec<_>>()
                 })
@@ -122,7 +147,7 @@ fn main() {
         //        let heightfield = generate_heightfield(2 ^ resolution, 2 ^ resolution);
 
         for vertex in vertices.iter_mut() {
-            vertex.position.z += heightfield.sample(vertex.uv);
+            vertex.position.z += heightfield.sample(vertex.uv) * 200.0;
         }
 
         Object::new(
@@ -130,8 +155,8 @@ fn main() {
             vertices,
             indices,
             vec![Instance::default()
-                .rotate(90.0f32.to_radians(), Vec3::X)
-                .scale(100.0)],
+                .rotated(90.0f32.to_radians(), Vec3::X)
+                .scaled(Vec3::new(500.0, 500.0, 1.0))],
         )
     };
 
@@ -195,7 +220,14 @@ fn main() {
             }
         }
 
-        plane.instances[0].set_rotation(30.0f32.to_radians() * dt, Vec3::Y);
+        let (scale, _, translation) = plane.instances[0].mat().to_scale_rotation_translation();
+        let rotation = Qua::from_axis_angle(Vec3::Y, time)
+            * Qua::from_axis_angle(Vec3::X, 90.0f32.to_radians());
+        plane.instances[0].set_mat(Mat4::from_scale_rotation_translation(
+            scale,
+            rotation,
+            translation,
+        ));
         plane.update(renderer);
         //object.update(renderer);
 
