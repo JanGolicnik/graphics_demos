@@ -1,7 +1,7 @@
 # Animations
 
-Simple skeleton animations.
-
-Did quickly and is fucked cuz I wanted to do it in a day and it took a bit.
+Simple skeleton animations. Switch between different animation with q and e
 
 Fuck gltf 
+
+![thumbnail](./thumbnail.png)

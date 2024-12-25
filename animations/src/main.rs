@@ -1,17 +1,6 @@
-use animated_object::{AnimatedObject, AnimatedVertex, Keyframes};
+use animated_object::{AnimatedObject, AnimatedVertex};
 use jandering_engine::{
-    engine::{Engine, EngineConfig},
-    object::{Instance, Object, Vertex},
-    render_pass::RenderPass,
-    renderer::Janderer,
-    shader::ShaderDescriptor,
-    texture::{texture_usage, TextureDescriptor, TextureFormat},
-    types::{Vec2, Vec3},
-    utils::{
-        free_camera::{FreeCameraController, MatrixCamera},
-        load_binary,
-    },
-    window::{FpsPreference, InputState, WindowConfig, WindowManagerTrait, WindowTrait},
+    engine::{Engine, EngineConfig}, object::{Instance, Vertex}, render_pass::RenderPass, renderer::Janderer, shader::ShaderDescriptor, texture::{texture_usage, TextureDescriptor, TextureFormat}, types::Vec3, utils::free_camera::{FreeCameraController, MatrixCamera}, window::{InputState, Key, WindowConfig, WindowManagerTrait, WindowTrait}
 };
 
 mod animated_object;
@@ -27,7 +16,7 @@ fn main() {
             .with_resolution(300, 300)
             .with_auto_resolution()
             .with_transparency(true)
-            .with_decorations(false)
+            .with_decorations(true)
             .with_title("beast"),
     );
 
@@ -56,15 +45,21 @@ fn main() {
         ..Default::default()
     });
 
-    let mut animated_object = pollster::block_on(AnimatedObject::from_gltf(renderer, "cube.gltf"));
+    let debug_shader = renderer.create_shader(ShaderDescriptor {
+        name: "debug_shader",
+        descriptors: vec![Vertex::desc(), Instance::desc()],
+        bind_group_layout_descriptors: vec![MatrixCamera::get_layout_descriptor()],
+        depth: true,
+        ..Default::default()
+    });
+
+
+    let mut animated_object = pollster::block_on(AnimatedObject::from_gltf(renderer, "character.gltf"));
     let mut time = 0.0;
     let mut last_time = std::time::Instant::now();
 
     let mut frame_counter = 0;
     let mut frame_accumulator = 0.0;
-
-    let mut animation_start_time = std::time::Instant::now();
-    let mut current_keyframe = 0;
 
     engine.run_with_events(|renderer, window_manager, events| {
         if window.should_close() {
@@ -120,12 +115,25 @@ fn main() {
                     key,
                     state: InputState::Pressed,
                 } => match key {
+                    Key::Q => {
+                        animated_object.current_animation = if animated_object.current_animation == 0 {
+                            animated_object.animations.len() - 1
+                        }else {
+                            animated_object.current_animation - 1
+                        };
+                    }
+                    Key::E => {
+                        animated_object.current_animation = if animated_object.current_animation + 1 >= animated_object.animations.len() {
+                            0
+                        }else {
+                            animated_object.current_animation + 1
+                        };
+                    }
                     _ => {}
                 },
                 _ => {}
             }
         }
-
 
         animated_object.update(renderer, dt);
 
@@ -141,7 +149,9 @@ fn main() {
                 .with_clear_color(0.6, 0.5, 0.4)
                 .bind(0, camera.bind_group())
                 .bind(1, animated_object.joint_data_bind_group)
-                .render(&animated_meshes);
+                .render(&animated_meshes)
+                .set_shader(debug_shader)
+                .render_one(&animated_object.debug_object);
             renderer.submit_pass(main_pass);
 
             window.request_redraw();

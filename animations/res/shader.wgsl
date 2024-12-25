@@ -17,11 +17,11 @@ struct Joints {
 var<storage, read_write> joints: Joints;
 
 struct VertexInput{
-    @location(0) position: vec4<f32>,
-    @location(1) normal: vec4<f32>,
+    @location(0) position: vec3<f32>,
+    @location(1) normal: vec3<f32>,
     @location(2) uv: vec2<f32>,
-    @location(3) weights: vec4<f32>,
-    @location(4) joints: vec4<u32>,
+    @location(3) weights: u32,
+    @location(4) joints: u32,
 };
 
 struct InstanceInput{
@@ -37,7 +37,8 @@ struct VertexOutput{
     @location(1) normal: vec3<f32>,
     @location(2) clip_position_raw: vec4<f32>,
     @location(4) @interpolate(flat) random_value: u32,
-    @location(5) weights: vec4<f32>
+    @location(5) weight: f32,
+    @location(6) joint: u32
 };
 
 @vertex
@@ -46,7 +47,6 @@ fn vs_main(
     instance: InstanceInput,
     @builtin(vertex_index) index: u32
 ) -> VertexOutput{
-
     let model_matrix = mat4x4<f32>(
         instance.model_matrix_0,
         instance.model_matrix_1,
@@ -54,27 +54,26 @@ fn vs_main(
         instance.model_matrix_3,
     );
 
-    var joint_matrix: mat4x4<f32> = mat4x4<f32>(
-        vec4<f32>(1.0, 0.0, 0.0, 0.0),
-        vec4<f32>(0.0, 1.0, 0.0, 0.0),
-        vec4<f32>(0.0, 0.0, 1.0, 0.0),
-        vec4<f32>(0.0, 0.0, 0.0, 1.0)
-    );
+    var position = vec4<f32>(0.0f);
+    var normal = vec4<f32>(0.0f);
+    for (var i = 0u; i < 4u; i += 1u){
+        let joint = (model.joints >> (i * 8u)) & 0xffu;
+        let weight_u32 = (model.weights >> (i * 8u)) & 0xffu;
+        let weight = f32(weight_u32) / 255.0f;
+        position = position + weight * (joints.j[joint] * vec4<f32>(model.position, 1.0f));
+        normal = normal + weight * (joints.j[joint] * vec4<f32>(model.normal, 0.0f));
+    }
 
-    let joint = model.joints[0];
-    joint_matrix = joints.j[joint];
-
-    //let world_position = model_matrix * vec4<f32>(model.position, 1.0);
-    let world_position = joint_matrix * vec4<f32>(model.position.xyz, 1.0);
-
+    let world_position = model_matrix * vec4<f32>(position.xyz, 1.0);
 
     var out: VertexOutput;
     out.clip_position_raw = camera.view_proj * world_position;
     out.clip_position = out.clip_position_raw;
     out.uv = model.uv;
-    out.weights = model.weights;
+    out.normal = normalize(normal).xyz;
     out.random_value = pcg_hash(index);
-    
+    out.weight = f32(model.weights & 0xffu);
+    out.joint = model.joints & 0xffu;
     return out;
 }
 
@@ -141,16 +140,17 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32>{
             warm = COLORS[9];
         }
         default: {
-            warm = vec3<f32>(1.0); // Fallback to white if needed
+            warm = vec3<f32>(1.0);
         }
     }
 
-    // let warm = vec3<f32>(1.0, 0.8, 0.5);
+    warm = vec3<f32>(1.0, 0.8, 0.5);
     let cool = vec3<f32>(0.2, 0.5, 1.0);
 
     let d = dot(light_dir, in.normal) * 0.5 + 0.5;
     let color = warm * (1.0 - d) + cool * d; 
 
-    //return vec4<f32>(color, 1.0);
-    return vec4<f32>(in.weights.rgb, 1.0);
+    //return vec4<f32>(in.weight / 255.0f, 0.0, 0.0, 1.0);
+ //   return vec4<f32>(f32(in.joint) / 65.0f, 0.0, 0.0, 1.0);
+    return vec4<f32>(color, 1.0);
 }
