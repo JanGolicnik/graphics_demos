@@ -1,6 +1,6 @@
 use animated_object::{AnimatedObject, AnimatedVertex};
 use jandering_engine::{
-    engine::{Engine, EngineConfig}, object::{Instance, Vertex}, render_pass::RenderPass, renderer::Janderer, shader::ShaderDescriptor, texture::{texture_usage, TextureDescriptor, TextureFormat}, types::Vec3, utils::free_camera::{FreeCameraController, MatrixCamera}, window::{InputState, Key, WindowConfig, WindowManagerTrait, WindowTrait}
+    engine::{Engine, EngineConfig}, render_pass::RenderPass, renderer::Janderer, shader::ShaderDescriptor, texture::{texture_usage, TextureDescriptor, TextureFormat}, types::Vec3, utils::free_camera::{FreeCameraController, MatrixCamera}, window::{InputState, Key, WindowConfig, WindowManagerTrait, WindowTrait}
 };
 
 mod animated_object;
@@ -45,16 +45,8 @@ fn main() {
         ..Default::default()
     });
 
-    let debug_shader = renderer.create_shader(ShaderDescriptor {
-        name: "debug_shader",
-        descriptors: vec![Vertex::desc(), Instance::desc()],
-        bind_group_layout_descriptors: vec![MatrixCamera::get_layout_descriptor()],
-        depth: true,
-        ..Default::default()
-    });
-
-
     let mut animated_object = pollster::block_on(AnimatedObject::from_gltf(renderer, "character.gltf"));
+
     let mut time = 0.0;
     let mut last_time = std::time::Instant::now();
 
@@ -135,12 +127,11 @@ fn main() {
             }
         }
 
-        animated_object.update(renderer, dt);
+        animated_object.update(renderer);
 
         camera.update(renderer, &events, dt);
 
         if window.is_initialized() {
-
             let animated_meshes = animated_object.meshes.iter().collect::<Vec<_>>();
 
             let main_pass = RenderPass::new(&mut window)
@@ -149,9 +140,7 @@ fn main() {
                 .with_clear_color(0.6, 0.5, 0.4)
                 .bind(0, camera.bind_group())
                 .bind(1, animated_object.joint_data_bind_group)
-                .render(&animated_meshes)
-                .set_shader(debug_shader)
-                .render_one(&animated_object.debug_object);
+                .render(&animated_meshes);
             renderer.submit_pass(main_pass);
 
             window.request_redraw();
