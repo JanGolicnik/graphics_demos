@@ -64,7 +64,7 @@ fn vs_main(
         normal = normal + weight * (joints.j[joint] * vec4<f32>(model.normal, 0.0f));
     }
 
-    let world_position = model_matrix * vec4<f32>(position.xyz, 1.0);
+    let world_position = vec4<f32>(position.xyz, 1.0);
 
     var out: VertexOutput;
     out.clip_position_raw = camera.view_proj * world_position;

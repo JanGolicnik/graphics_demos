@@ -12,6 +12,7 @@ use jandering_engine::{
     utils::load_binary,
 };
 
+#[derive(Debug)]
 pub struct AnimatedObject {
     pub meshes: Vec<Mesh>,
     pub nodes: Vec<Node>,
@@ -180,7 +181,7 @@ impl AnimatedObject {
                     render_data,
                 }
             })
-            .collect();
+            .collect::<Vec<_>>();
 
         let animations = gltf
             .animations()
