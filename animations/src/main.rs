@@ -1,3 +1,5 @@
+use std::env;
+
 use animated_object::{AnimatedObject, AnimatedVertex};
 use jandering_engine::{
     engine::{Engine, EngineConfig}, render_pass::RenderPass, renderer::Janderer, shader::ShaderDescriptor, texture::{texture_usage, TextureDescriptor, TextureFormat}, types::Vec3, utils::free_camera::{FreeCameraController, MatrixCamera}, window::{InputState, Key, WindowConfig, WindowManagerTrait, WindowTrait}
@@ -6,6 +8,8 @@ use jandering_engine::{
 mod animated_object;
 
 fn main() {
+    let model_file_name = std::env::args().nth(1).unwrap_or("character.gltf".to_string());
+
     let mut engine = pollster::block_on(Engine::new(EngineConfig {
         writable_storage: true,
     }));
@@ -45,7 +49,7 @@ fn main() {
         ..Default::default()
     });
 
-    let mut animated_object = pollster::block_on(AnimatedObject::from_gltf(renderer, "character.gltf"));
+    let mut animated_object = pollster::block_on(AnimatedObject::from_gltf(renderer, &model_file_name));
 
     let mut time = 0.0;
     let mut last_time = std::time::Instant::now();

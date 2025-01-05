@@ -83,9 +83,9 @@ pub struct Node {
 }
 
 impl AnimatedObject {
-    pub async fn from_gltf(renderer: &mut Renderer, path: &'static str) -> Self {
+    pub async fn from_gltf(renderer: &mut Renderer, path: &str) -> Self {
         let gltf = gltf::Gltf::from_slice(
-            &load_binary(jandering_engine::utils::FilePath::FileName(path))
+            &load_binary(jandering_engine::utils::FilePath::FileName(unsafe{std::mem::transmute::<&str, &'static str>(path)}))
                 .await
                 .unwrap(),
         )
